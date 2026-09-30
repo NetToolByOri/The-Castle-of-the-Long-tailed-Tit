@@ -88,7 +88,7 @@
 <body><div id="opsStatus" role="status" aria-live="polite" hidden>正在載入共用資料…</div><div id="opsLock"><div><h2>🔒 工具暫停</h2><p>正在開啟共用資料…</p><button id="opsResume">重新載入最新資料並接手</button></div></div>
 <div class="app">
   <header class="top">
-    <div class="title-line"><h1>休假作業管制工具 <small>v4.16</small></h1><span class="title-actions"><button id="systemBtn" class="settings-button" title="系統" aria-label="系統設定">⚙️</button><button id="quickTextBuilder" class="quick-text">文字輸出</button><a href="318-主控台.html" title="返回 318 主控台" aria-label="首頁" style="color:#bce9eb;text-decoration:none;border:1px solid #527187;border-radius:7px">⌂</a><button id="statusToggle" class="status-toggle">細節</button></span></div>
+    <div class="title-line"><h1>休假作業管制工具 <small>v4.15</small></h1><span class="title-actions"><button id="systemBtn" class="settings-button" title="系統" aria-label="系統設定">⚙️</button><button id="quickTextBuilder" class="quick-text">文字輸出</button><a href="318-主控台.html" title="返回 318 主控台" aria-label="首頁" style="color:#bce9eb;text-decoration:none;border:1px solid #527187;border-radius:7px">⌂</a><button id="statusToggle" class="status-toggle">細節</button></span></div>
     <div class="date-line"><label for="reportDate">資料日期</label><input id="reportDate" type="date"><button id="todayBtn">今日</button><button id="addPerson" class="good">＋新增</button></div>
     <div class="view-tabs"><button id="timelineView" class="active">時序</button><button id="personView">人物</button><button id="dismissView">銷假</button><button id="annualView">年度</button><button id="personalView">個人</button><button id="historyView">數據庫</button><button id="routeView">航線</button><button id="combatView">對抗</button></div>
   </header>
@@ -483,6 +483,10 @@ function annualPersonalSheet(){const id=annualPerson,p=ops.data.roster.people.fi
 function annualLedgerData(id,year=annualYear){
  const account=state.annualAccounts[id+'|'+year]||{},keys=ledgerKeys;
  const base=Object.fromEntries(keys.map(key=>[key,Number.isFinite(Number(account[key]))?Number(account[key]):0]));
+ const calculationBase={...base};
+ /* 紙本保留補假／補島負數；結算時視為去年超休，先抵今年一般額度，不把債留在補額餘額。 */
+ if(calculationBase.comp<0){calculationBase.taiwan=round2(calculationBase.taiwan+calculationBase.comp);calculationBase.comp=0}
+ if(calculationBase.compIsland<0){calculationBase.island=round2(calculationBase.island+calculationBase.compIsland);calculationBase.compIsland=0}
  const cutoff=annualSettlementDate(year),empty=()=>Object.fromEntries(keys.map(k=>[k,0])),months=Array.from({length:12},()=>({formulaNormal:empty(),formulaTraining:empty(),normal:empty(),trainingUsage:empty(),overridden:Object.fromEntries(keys.map(k=>[k,false])),compIsland:0,island:0,taiwan:0,comfort:0,comp:0,training:0,holidayTraining:0,publicPlane:0,publicBoat:0,deduction:{rawTaiwan:0,rawIsland:0,cumulativeRawTaiwan:0,cumulativeRawIsland:0,cumulativeTaiwan:0,cumulativeIsland:0}}));
  const expiry={comp:year+'-'+state.params.leaveExpiryMonthDay,compIsland:year+'-'+state.params.islandExpiryMonthDay},expiryOn={comp:state.params.leaveExpiryEnabled,compIsland:state.params.islandExpiryEnabled},preExpiryFormula={comp:0,compIsland:0};
  const addFormula=(month,key,amount)=>{month.formulaNormal[key]=round2(month.formulaNormal[key]+(Number(amount)||0))};
@@ -500,12 +504,12 @@ function annualLedgerData(id,year=annualYear){
  }
  for(let i=0;i<months.length;i++)for(const key of keys){const month=months[i],override=monthlyOverride(id,year,i+1,key),normalSet=override&&Object.hasOwn(override,'normal')&&Number.isFinite(Number(override.normal)),trainingSet=key!=='comfort'&&override&&Object.hasOwn(override,'training')&&Number.isFinite(Number(override.training));month.normal[key]=round2(normalSet?Number(override.normal):month.formulaNormal[key]);month.trainingUsage[key]=round2(key==='comfort'?0:trainingSet?Number(override.training):month.formulaTraining[key]);month.overridden[key]=!!(normalSet||trainingSet);month[key]=round2(month.normal[key]+month.trainingUsage[key])}
  const expired={comp:0,compIsland:0},pools={};
- for(const key of keys){const used=round2(months.reduce((sum,month)=>sum+month[key],0));if(expiryOn[key]){const expiryMonth=+expiry[key].slice(5,7),priorEffective=months.slice(0,expiryMonth-1).reduce((sum,month)=>sum+month[key],0),priorFormula=months.slice(0,expiryMonth-1).reduce((sum,month)=>sum+month.formulaNormal[key],0),usedBefore=round2(priorEffective+preExpiryFormula[key]-priorFormula),expirable=Math.max(0,base[key]);expired[key]=round2(Math.max(0,expirable-usedBefore))}pools[key]=round2(base[key]-used-(expired[key]||0))}
+ for(const key of keys){const used=round2(months.reduce((sum,month)=>sum+month[key],0));if(expiryOn[key]){const expiryMonth=+expiry[key].slice(5,7),priorEffective=months.slice(0,expiryMonth-1).reduce((sum,month)=>sum+month[key],0),priorFormula=months.slice(0,expiryMonth-1).reduce((sum,month)=>sum+month.formulaNormal[key],0),usedBefore=round2(priorEffective+preExpiryFormula[key]-priorFormula);expired[key]=round2(Math.max(0,calculationBase[key]-usedBefore))}pools[key]=round2(calculationBase[key]-used-(expired[key]||0))}
  const usageText=(normal,training)=>{normal=round2(normal);training=round2(training);return training?normal+'+'+training:String(normal)};
  const rows=keys.map(key=>{const normalValues=months.map(m=>m.normal[key]),trainingValues=months.map(m=>m.trainingUsage[key]),values=months.map(m=>m[key]),used=round2(values.reduce((sum,x)=>sum+x,0));return{key,title:ledgerTitles[key],initial:base[key],normalValues,trainingValues,values,overridden:months.map(m=>m.overridden[key]),displayValues:values.map((_,i)=>usageText(normalValues[i],trainingValues[i])),used,remaining:pools[key],expired:expired[key]||0}});
  const subtotal=(key,title,members)=>{const selected=rows.filter(r=>members.includes(r.key)),normalValues=months.map((_,i)=>round2(selected.reduce((n,r)=>n+r.normalValues[i],0))),trainingValues=months.map((_,i)=>round2(selected.reduce((n,r)=>n+r.trainingValues[i],0))),values=months.map((_,i)=>round2(selected.reduce((n,r)=>n+r.values[i],0)));return{key,title,initial:round2(selected.reduce((n,r)=>n+r.initial,0)),normalValues,trainingValues,values,displayValues:values.map(String),used:round2(values.reduce((n,v)=>n+v,0)),remaining:round2(selected.reduce((n,r)=>n+r.remaining,0))}};
  rows.push(subtotal('subtotal1','小計1',['comp','taiwan','comfort']));rows.push(subtotal('total','小計2',['comp','taiwan','comfort','compIsland','island']));
- return{base,months,rows,cutoff,expiredLeave:expired.comp||0,expiredIsland:expired.compIsland||0,missingHolidayCalendar:state.params.trainingRule==='b'&&!holidayCalendar(year)};
+ return{base,calculationBase,months,rows,cutoff,expiredLeave:expired.comp||0,expiredIsland:expired.compIsland||0,missingHolidayCalendar:state.params.trainingRule==='b'&&!holidayCalendar(year)};
 }
 function annualLedgerHtml(){
  const id=annualPerson;if(!id)return'';const {rows,months,expiredLeave,expiredIsland,cutoff,missingHolidayCalendar}=annualLedgerData(id);
